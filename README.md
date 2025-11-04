@@ -1,2 +1,2 @@
-# FirstGoOperatorOpenshift
+# CexPluginOperatorOpenshift
 "# CexPluginOperator" 
