@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- cex_v1alpha1_cexplugin.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
