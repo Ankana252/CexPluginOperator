@@ -51,37 +51,66 @@ type CexPluginReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
 func (r *CexPluginReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
-
+	logger := logf.FromContext(ctx)
+	logger.Info("Reconciling CexPlugin ConfigMap", "Name", req.Name, "Namespace", req.Namespace)
 	// TODO(user): your logic here
-	var cm corev1.ConfigMap
-	if err := r.Get(ctx, types.NamespacedName{Name: "cex-config",
-		Namespace: "cex-device-plugin"}, &cm); err != nil {
-		// Handle error
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+
+	// Fetch the ConfigMap
+	configMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, req.NamespacedName, configMap)
+	if err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			logger.Info("ConfigMap not found, may have been deleted", "name", req.Name)
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Failed to get ConfigMap")
+		return ctrl.Result{}, err
+	}
+
+	// Log the ConfigMap data
+	logger.Info("ConfigMap change detected!",
+		"name", configMap.Name,
+		"namespace", configMap.Namespace,
+		"data", configMap.Data)
+
+	if data, ok := configMap.Data["cex_resources.json"]; ok {
+		logger.Info("cex_resources.json content", "content", data)
+	} else {
+		logger.Info("cex_resources.json key not found in ConfigMap")
 	}
 
 	return ctrl.Result{}, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
+// findConfigMapsForReconcile maps ConfigMap events to reconcile requests
+func (r *CexPluginReconciler) findConfigMapsForReconcile(ctx context.Context, configMap client.Object) []reconcile.Request {
+	logger := logf.FromContext(ctx)
+
+	// Only watch ConfigMaps named "cex-resources" in namespace "cex-device-plugin"
+	if configMap.GetName() == "cex-resources" && configMap.GetNamespace() == "cex-device-plugin" {
+		logger.Info("ConfigMap watch triggered", "name", configMap.GetName())
+
+		// Return a reconcile request
+		// You can return multiple requests if needed
+		return []reconcile.Request{
+			{
+				NamespacedName: types.NamespacedName{
+					Name:      configMap.GetName(),
+					Namespace: configMap.GetNamespace(),
+				},
+			},
+		}
+	}
+
+	return []reconcile.Request{}
+}
 
 func (r *CexPluginReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&cexv1alpha1.CexPlugin{}). // Primary resource
+		For(&cexv1alpha1.CexPlugin{}).
 		Watches(
-			&corev1.ConfigMap{}, // Secondary resource
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				// Always reconcile the same CR (or map logic if multiple CRs exist)
-				return []reconcile.Request{
-					{
-						NamespacedName: types.NamespacedName{
-							Name:      "cexplugin-sample",    // Your CR name
-							Namespace: "cex-operator-system", // Use namespace of ConfigMap
-						},
-					},
-				}
-			}),
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.findConfigMapsForReconcile),
 		).
 		Complete(r)
 }
